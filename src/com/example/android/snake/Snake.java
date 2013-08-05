@@ -17,12 +17,24 @@
 package com.example.android.snake;
 
 import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.os.Bundle;
+import android.os.IBinder;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.View.OnTouchListener;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import com.samsung.chord.ChordManager;
+import com.samsung.chord.samples.apidemo.service.ChordSnakeService;
+import com.samsung.chord.samples.apidemo.service.ChordSnakeService.ChordServiceBinder;
+import com.samsung.chord.samples.apidemo.service.ChordSnakeService.IChordServiceListener;
 
 /**
  * Snake: a simple game that everyone can enjoy.
@@ -33,8 +45,12 @@ import android.widget.TextView;
  * game.
  * 
  */
-public class Snake extends Activity {
+public class Snake extends Activity implements IChordServiceListener {
 
+	private static final String TAG = "[Chord][ApiTest]";
+    private static final String TAGClass = "SnakeActivity : ";
+    private String mChannelName = "";
+    private String mNodeName = "";
     /**
      * Constants for desired direction of moving the snake
      */
@@ -90,7 +106,8 @@ public class Snake extends Activity {
 
                     // Direction is same as the quadrant which was clicked
                     mSnakeView.moveSnake(direction);
-
+                    String message = String.valueOf(direction);
+                    mChordService.sendDataToAll(mChannelName, message.getBytes());
                 } else {
                     // If the game is not running then on touching any part of the screen
                     // we start the game by sending MOVE_UP signal to SnakeView
@@ -99,8 +116,15 @@ public class Snake extends Activity {
                 return false;
             }
         });
+        
+        startService();
+        bindChordService();
     }
 
+    private Activity getActivity() {
+    	return Snake.this;
+    }
+    
     @Override
     protected void onPause() {
         super.onPause();
@@ -139,5 +163,155 @@ public class Snake extends Activity {
 
         return super.onKeyDown(keyCode, msg);
     }
+ 
+    // **********************************************************************
+    // Using Service
+    // **********************************************************************
+    private ChordSnakeService mChordService = null;
 
+    private ServiceConnection mConnection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            // TODO Auto-generated method stub
+            Log.d(TAG, TAGClass + "onServiceConnected()");
+            ChordServiceBinder binder = (ChordServiceBinder)service;
+            mChordService = binder.getService();
+            try {
+                mChordService.initialize(Snake.this);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            int interfaceConnection = 0;
+            for (int interfaceValue : mChordService.getAvailableInterfaceTypes()) {
+                Log.d(TAG, TAGClass + "Available interface : " + interfaceValue);
+                if (interfaceValue == ChordManager.INTERFACE_TYPE_WIFI) {
+                	interfaceConnection = ChordManager.INTERFACE_TYPE_WIFI;
+                	Log.d(TAG, TAGClass + "ChordManager.INTERFACE_TYPE_WIFI");
+                	break;
+                } else if (interfaceValue == ChordManager.INTERFACE_TYPE_WIFIAP) {
+                	interfaceConnection = ChordManager.INTERFACE_TYPE_WIFIAP;
+                	Log.d(TAG, TAGClass + "ChordManager.INTERFACE_TYPE_WIFIAP");
+                	break;
+                } else if (interfaceValue == ChordManager.INTERFACE_TYPE_WIFIP2P) {
+                	interfaceConnection = ChordManager.INTERFACE_TYPE_WIFIP2P;
+                	Log.d(TAG, TAGClass + "ChordManager.INTERFACE_TYPE_WIFIP2P");
+                	break;
+                }
+            }
+            int nError = mChordService.start(interfaceConnection);
+            if (ChordManager.ERROR_NONE == nError) {
+            	Toast.makeText(getActivity(), "Connection ok", Toast.LENGTH_SHORT).show();
+            } else if (ChordManager.ERROR_INVALID_INTERFACE == nError) {
+                Toast.makeText(getActivity(), "Invalid connection", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(getActivity(), "Fail to start", Toast.LENGTH_SHORT).show();
+            }
+
+            mChannelName = mChordService.getPublicChannel();
+            mChordService.joinChannel(mChannelName);
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            // TODO Auto-generated method stub
+            Log.i(TAG, TAGClass + "onServiceDisconnected()");
+            mChordService = null;
+        }
+    };
+    public void bindChordService() {
+        Log.i(TAG, TAGClass + "bindChordService()");
+        if (mChordService == null) {
+            Intent intent = new Intent(
+                    "com.samsung.chord.samples.apidemo.service.ChordSnakeService.SERVICE_BIND");
+            bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
+        }
+    }
+
+    private void unbindChordService() {
+        Log.i(TAG, TAGClass + "unbindChordService()");
+
+        if (null != mChordService) {
+            unbindService(mConnection);
+        }
+        mChordService = null;
+    }
+
+    private void startService() {
+        Log.i(TAG, TAGClass + "startService()");
+        Intent intent = new Intent("com.samsung.chord.samples.apidemo.service.ChordSnakeService.SERVICE_START");
+        startService(intent);
+    }
+
+    private void stopService() {
+        Log.i(TAG, TAGClass + "stopService()");
+        Intent intent = new Intent("com.samsung.chord.samples.apidemo.service.ChordSnakeService.SERVICE_STOP");
+        stopService(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        // TODO Auto-generated method stub
+        super.onDestroy();
+        unbindChordService();
+        stopService();
+        Log.v(TAG, TAGClass + "onDestroy");
+    }
+    
+	@Override
+	public void onReceiveMessage(String node, String channel, String message) {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onReceiveMessage node="+node+" channel="+channel+" message="+message);
+		int direction = Integer.parseInt(message);
+		if (0 <= direction && direction <= 3) {
+			mSnakeView.moveSnake(direction);
+		}
+	}
+
+	@Override
+	public void onFileWillReceive(String node, String channel, String fileName,
+			String exchangeId) {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onFileWillReceive");
+	}
+
+	@Override
+	public void onFileProgress(boolean bSend, String node, String channel,
+			int progress, String exchangeId) {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onFileProgress");
+	}
+
+	@Override
+	public void onFileCompleted(int reason, String node, String channel,
+			String exchangeId, String fileName) {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onFileCompleted");
+	}
+
+	@Override
+	public void onNodeEvent(String node, String channel, boolean bJoined) {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onNodeEvent node="+node+" channel="+channel+" bJoined="+bJoined);
+		mNodeName = node;
+	}
+
+	@Override
+	public void onNetworkDisconnected() {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onNetworkDisconnected");
+	}
+
+	@Override
+	public void onUpdateNodeInfo(String nodeName, String ipAddress) {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onUpdateNodeInfo");
+	}
+
+	@Override
+	public void onConnectivityChanged() {
+		// TODO Auto-generated method stub
+		Log.v(TAG, TAGClass + "onConnectivityChanged");
+	}
 }
